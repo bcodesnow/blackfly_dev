@@ -1,0 +1,32 @@
+VideoThread: Reading available pixel formats
+
+Mono8
+Mono16
+RGB8Packed
+BayerRG8
+BayerRG16
+Mono12Packed
+BayerRG12Packed
+YUV411Packed
+YUV422Packed
+YUV444Packed
+Mono12p
+BayerRG12p
+YCbCr8
+YCbCr422_8
+YCbCr411_8
+BGR8
+BGRa8
+
+Format not available: BayerGR8
+Format not available: BayerGB8
+Format not available: BayerBG8
+Format not available: BayerGR16
+Format not available: BayerGB16
+Format not available: BayerBG16
+Format not available: BayerGR12Packed
+Format not available: BayerGB12Packed
+Format not available: BayerBG12Packed
+Format not available: BayerGR12p
+Format not available: BayerGB12p
+Format not available: BayerBG12p

@@ -1,5 +1,7 @@
-#ifndef VIDEOTHREAD_H
-#define VIDEOTHREAD_H
+#ifndef SPINNAKERIMAGING_H
+#define SPINNAKERIMAGING_H
+
+#include "imagebuffer.h"
 
 #include "Spinnaker.h"
 #include "SpinGenApi/SpinnakerGenApi.h"
@@ -10,6 +12,7 @@
 #include <QFileInfo>
 #include <QDir>
 
+// we dont use fucking manufacturer specific namespaces
 //using namespace Spinnaker;
 //using namespace Spinnaker::GenApi;
 //using namespace Spinnaker::GenICam;
@@ -19,18 +22,24 @@ class SpinnakerImaging : public QThread
 {
     Q_OBJECT
 private:
-    QString m_pixFmt = "Mono16";// Mono8 Mono16 BayerRG16 YUV444Packed BGR8 YCbCr8
+    QString m_pixFmt = "Mono8";// Mono8 Mono16 BayerRG16 YUV444Packed BGR8 YCbCr8
     double m_exposureTime = 3000;
-    bool m_exposureTimeAuto = false;
+    bool m_exposureTimeAuto = true;
     const QString m_trigger = "SOFTWARE"; // "NONE" "HARDWARE"
     double m_fps;
+    bool m_print = false;
+
+    int64_t m_imgWidth;
+    int64_t m_imgHeight;
 
     QString m_targetLocation;
     QString m_spinnakerVersion;
     bool m_acquisition = false;
     bool m_initialized = false;
-    int m_imageCnt = 0;
+    uint64_t m_imageCnt = 0;
     QString m_debug_name = "SpinnakerImaging: ";
+
+    ImageBuffer *m_refSpinnakerToBuffer;
 
 
     // Spinnaker stuff
@@ -103,10 +112,12 @@ public:
     void Indent(unsigned int level);
 
 signals:
+    void acquisitionStarted();
+
 
 public slots:
 
-    void videoThreadFinished()
+    void imagerFinished()
     {
         qDebug()<<m_debug_name<<"finished.";
         if (m_initialized) deinitBlackflyS();
@@ -118,4 +129,4 @@ public slots:
 
 };
 
-#endif // VIDEOTHREAD_H
+#endif // SPINNAKERIMAGING_H

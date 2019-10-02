@@ -1,9 +1,13 @@
 #include "spinnakerimaging.h"
 
-SpinnakerImaging::SpinnakerImaging(QObject *parent)
+SpinnakerImaging::SpinnakerImaging(QObject *bufferref)
 {
-    Q_UNUSED(parent)
-    connect(this, &SpinnakerImaging::finished, this, &SpinnakerImaging::videoThreadFinished);
+    m_refSpinnakerToBuffer = static_cast<ImageBuffer*>(bufferref);
+    connect(this, &SpinnakerImaging::finished, this, &SpinnakerImaging::imagerFinished);
+    connect(this, &SpinnakerImaging::acquisitionStarted, this, &SpinnakerImaging::run);
+
+    // Init cam
+    this->initBlackflyS();
 }
 
 void SpinnakerImaging::setAcquisition(bool acqu)
@@ -45,7 +49,7 @@ double SpinnakerImaging::getCurrentFrameRate()
 
 void SpinnakerImaging::setPixelFormat()
 {
-     m_ptrPixelFormat = m_nodeMap->GetNode("PixelFormat");
+    m_ptrPixelFormat = m_nodeMap->GetNode("PixelFormat");
     if (IsAvailable(m_ptrPixelFormat) && IsWritable(m_ptrPixelFormat))
     {
         Spinnaker::GenApi::CEnumEntryPtr ptrPixelFormatEntry = m_ptrPixelFormat->GetEntryByName(m_pixFmt.toStdString().c_str());
@@ -127,14 +131,16 @@ void SpinnakerImaging::setResolutionMax()
     if (IsAvailable(m_ptrWidth) && IsWritable(m_ptrWidth))
     {
         m_ptrWidth->SetValue(m_ptrWidth->GetMax());
-        qDebug()<<m_debug_name+"Width set to maximum"<<m_ptrWidth->GetValue();
+        m_imgWidth = m_ptrWidth->GetValue();
+        qDebug()<<m_debug_name+"Width set to maximum"<<m_imgWidth;
     }
     else qDebug()<<m_debug_name+"Width not available";
 
     if (IsAvailable(m_ptrHeight) && IsWritable(m_ptrHeight))
     {
         m_ptrHeight->SetValue(m_ptrHeight->GetMax());
-        qDebug()<<m_debug_name+"Height set to maximum"<<m_ptrHeight->GetValue();
+        m_imgHeight = m_ptrHeight->GetValue();
+        qDebug()<<m_debug_name+"Height set to maximum"<<m_imgHeight;
     }
     else qDebug()<<m_debug_name+"Height not available";
 }
@@ -217,7 +223,7 @@ void SpinnakerImaging::printDeviceInfo()
         {
             const Spinnaker::GenApi::CNodePtr pfeatureNode = *it;
             Spinnaker::GenApi::CValuePtr pValue = static_cast<Spinnaker::GenApi::CValuePtr>(pfeatureNode);
-            qDebug()<<"VideoThread:"<<pfeatureNode->GetName()<<":"<<(IsReadable(pValue) ? pValue->ToString() : "Node not readable");
+            qDebug()<<m_debug_name+pfeatureNode->GetName()<<":"<<(IsReadable(pValue) ? pValue->ToString() : "Node not readable");
             //qDebug() << (IsReadable(pValue) ? pValue->ToString() : "Node not readable");
         }
     }
@@ -324,18 +330,25 @@ int SpinnakerImaging::initBlackflyS()
             // Set trigger
             setTrigger(m_trigger); // implementation needed
             // Read pixel formats
-            printAvailableFormats();
+            if (m_print) printAvailableFormats();
             // Pixel Format
             // had the issue that pixel format could not be changed anymore
             setPixelFormat(); // BayerRG16 BayerRG12p YUV444Packed BGR8 YCbCr8
             // Offset X + Y
             setOffset(0,0);
             // Resolution
-            setResolutionMax(); //setResolution(640,512);
+            setResolutionMax();
+            //setResolution(640,512);
+            //setResolution(1280,1024);
+            m_refSpinnakerToBuffer->setStdResolution(static_cast<int>(m_imgWidth),
+                                                     static_cast<int>(m_imgHeight));
+
             // Frame rate
-            qDebug()<<m_debug_name+"Maximum frame rate:"<<getFrameRateMax();
             m_fps = getCurrentFrameRate();
+            m_refSpinnakerToBuffer->setBufferCapByFps(m_fps);
+            qDebug()<<m_debug_name+"Maximum frame rate:"<<getFrameRateMax();
             qDebug()<<m_debug_name+"Current frame rate:"<<m_fps;
+
             // Acquisition Mode
             setAcquisitionMode("Continuous");
             // Exposure Time
@@ -343,17 +356,19 @@ int SpinnakerImaging::initBlackflyS()
                 setExposureTimeManual(m_exposureTime);
             else setExposureTimeAuto();
             // Manufacturer printing functions
-            printAllNodeFeatures(m_pCam);
+            if (m_print) printAllNodeFeatures(m_pCam);
             // Start acquisition. Note that the camera needs some time to adjust its brightness.
             m_pCam->BeginAcquisition();
+            qDebug()<<"Blackfly Init complete";
+            m_acquisition = true;
+            m_initialized = true;
+            emit acquisitionStarted();
         }
         catch (Spinnaker::Exception& e)
         {
             qDebug()<<m_debug_name+"initBlackflyS: Error:"<<e.what()<<e.GetError()<<e.GetErrorMessage();
             return -1;
         }
-        qDebug()<<"Blackfly Init complete";
-        m_initialized = true;
         return 0;
     }
     else {
@@ -366,7 +381,6 @@ int SpinnakerImaging::deinitBlackflyS()
 {
     if (m_initialized)
     {
-        m_pCam->EndAcquisition();
         try {
             // Deinitialize cam
             m_pCam->EndAcquisition();
@@ -392,7 +406,7 @@ int SpinnakerImaging::deinitBlackflyS()
 }
 
 void SpinnakerImaging::run() {
-    qDebug()<<m_debug_name+"Acquisition started.";
+    qDebug()<<m_debug_name+"Acquisition started."<<m_acquisition;
 
     while (m_acquisition) {
         try
@@ -407,27 +421,42 @@ void SpinnakerImaging::run() {
             }
             else
             {
-                const size_t width = pResultImage->GetWidth();
-                const size_t height = pResultImage->GetHeight();
-
                 m_imageCnt++;
+                //qDebug()<<"Grabbed images:"<<m_imageCnt;
+                // convert to OpenCV Mat
+                int XPadding = static_cast<int>( pResultImage->GetXPadding() );
+                int YPadding = static_cast<int>( pResultImage->GetYPadding() );
+                int rowsize = static_cast<int>( pResultImage->GetWidth() );
+                int colsize = static_cast<int>( pResultImage->GetHeight() );
 
-                // convert not used right now
-                //Spinnaker::ImagePtr convertedImage = pResultImage->Convert(Spinnaker::PixelFormatEnums::PixelFormat_Mono8,
-                //                                                           Spinnaker::ColorProcessingAlgorithm::HQ_LINEAR);
+                //image data contains padding. When allocating Mat container size, you need to account for the X,Y image data padding.
+                Mat cvimg = cv::Mat(colsize + YPadding, rowsize + XPadding, CV_8UC1, pResultImage->GetData(), pResultImage->GetStride());
 
-                // Create a unique filename
-                QString exposure;
-                if (m_exposureTimeAuto)
-                    exposure = "auto";
-                else
-                    exposure = QString::number(m_exposureTime,'g',2);
-                QString filename = "Img-"+QString::number(m_imageCnt)+"_fmt-"+m_pixFmt
-                        +"_fps-"+QString::number(m_fps,'g',2)+"_exp-"+exposure;
+                m_refSpinnakerToBuffer->writeImgToBuffer(cvimg);
 
-                // Save image
-                pResultImage->Save(filename.toStdString().c_str(),Spinnaker::ImageFileFormat::BMP); // RAW PPM BMP JPEG PNG
-                qDebug()<<"SAVED:"<<filename;
+
+
+                // save to file
+                if (false) // not used for later application
+                {
+                    //                const size_t width = pResultImage->GetWidth();
+                    //                const size_t height = pResultImage->GetHeight();
+                    // convert not used right now
+                    //Spinnaker::ImagePtr convertedImage = pResultImage->Convert(Spinnaker::PixelFormatEnums::PixelFormat_Mono8,
+                    //                                                           Spinnaker::ColorProcessingAlgorithm::HQ_LINEAR);
+
+                    QString exposure;
+                    if (m_exposureTimeAuto)
+                        exposure = "auto";
+                    else
+                        exposure = QString::number(m_exposureTime,'g',2);
+                    QString filename = "Img-"+QString::number(m_imageCnt)+"_fmt-"+m_pixFmt
+                            +"_fps-"+QString::number(m_fps,'g',2)+"_exp-"+exposure;
+                    // Save image
+                    pResultImage->Save(filename.toStdString().c_str(),Spinnaker::ImageFileFormat::BMP); // RAW PPM BMP JPEG PNG
+                    qDebug()<<"IMAGE:"<<filename;
+                }
+
             }
 
             // Release image

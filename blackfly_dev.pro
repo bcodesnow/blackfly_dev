@@ -1,4 +1,4 @@
-QT += quick
+QT += quick widgets
 
 CONFIG += c++11
 
@@ -14,6 +14,8 @@ DEFINES += QT_DEPRECATED_WARNINGS
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+        imagebuffer.cpp \
+        imageprocessor.cpp \
         main.cpp \
         spinnakerimaging.cpp
 
@@ -22,9 +24,11 @@ RESOURCES += qml.qrc
 
 # Includes
 INCLUDEPATH += /usr/include/spinnaker # spinnaker
+INCLUDEPATH += /usr/local/include/opencv4 # opencv
 #INCLUDEPATH += /usr/include/gstreamer-1.0 /usr/include/glib-2.0 /usr/lib/x86_64-linux-gnu/glib-2.0/include # gstreamer
 # Libs
 LIBS += -lSpinnaker -lSpinVideo -lSpinUpdate # spinnaker
+LIBS += -lopencv_core -lopencv_highgui -lopencv_imgproc -lopencv_videoio # opencv
 #CONFIG += link_pkgconfig
 #PKGCONFIG += gstreamer-1.0 glib-2.0 gobject-2.0  # gstreamer-app-1.0 gstreamer-pbutils-1.0 # gstreamer
 
@@ -41,4 +45,6 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
 HEADERS += \
+    imagebuffer.h \
+    imageprocessor.h \
     spinnakerimaging.h
